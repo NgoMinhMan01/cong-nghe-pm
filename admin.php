@@ -1,104 +1,16 @@
 <?php
-session_start();
-require_once 'config.php';
-require_once 'permissions.php';
-
-require_permission(PERMISSION_ADMIN_DASHBOARD);
-
-$counts = [
-    'rooms' => 0,
-    'bookings' => 0,
-    'customers' => 0,
-    'employees' => 0,
-];
-
-$result = mysqli_query($conn, 'SELECT COUNT(*) AS total FROM PHONG');
-if ($result) {
-    $counts['rooms'] = mysqli_fetch_assoc($result)['total'];
+require 'app/bootstrap.php'; require_roles('Admin','Lễ tân');
+$from=(string)($_GET['from']??date('Y-m-01')); $to=(string)($_GET['to']??date('Y-m-d'));
+if(!valid_date($from)||!valid_date($to)||$from>$to) { $from=date('Y-m-01'); $to=date('Y-m-d'); }
+$stats=row("SELECT COUNT(*) total,SUM(TINHTRANG='Có khách') occupied,SUM(TINHTRANG='Chờ dọn') dirty,SUM(TINHTRANG='Bảo trì') maintenance FROM phong WHERE ACTIVE=1");
+$in=(int)row("SELECT COUNT(*) n FROM dat WHERE TRANGTHAI='Chờ nhận' AND DATE(NGAYNHAN)=CURDATE()")['n']; $out=(int)row("SELECT COUNT(*) n FROM dat WHERE TRANGTHAI='Đang ở' AND DATE(NGAYTRA)<=CURDATE()")['n'];
+$cash=row('SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) received,COALESCE(SUM(CASE WHEN amount<0 THEN -amount ELSE 0 END),0) refunded,COALESCE(SUM(amount),0) net FROM payments WHERE created_at>=? AND created_at<DATE_ADD(?,INTERVAL 1 DAY)',[$from,$to]);
+$revenue=row('SELECT COUNT(*) n,COALESCE(SUM(total),0) total FROM invoices WHERE created_at>=? AND created_at<DATE_ADD(?,INTERVAL 1 DAY)',[$from,$to]);
+$daily=rows('SELECT DATE(created_at) day,SUM(amount) net FROM payments WHERE created_at>=? AND created_at<DATE_ADD(?,INTERVAL 1 DAY) GROUP BY DATE(created_at) ORDER BY day',[$from,$to]);
+$warnings=rows("SELECT d.*,k.HOTENKH FROM dat d JOIN khach_hang k ON k.MAKH=d.MAKH WHERE (TRANGTHAI='Đang ở' AND NGAYTRA<=CURDATE()) OR (TRANGTHAI='Chờ nhận' AND NGAYNHAN<CURDATE()) OR LEGACY_REVIEW=1 ORDER BY NGAYNHAN LIMIT 100");
+if(isset($_GET['export'])) {
+    header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="bao_cao_thu_tien.csv"'); echo "\xEF\xBB\xBF"; $f=fopen('php://output','w'); fputcsv($f,['Ngày','Thu ròng VND']); foreach($daily as $d) fputcsv($f,[$d['day'],$d['net']]); fclose($f); exit;
 }
-$result = mysqli_query($conn, 'SELECT COUNT(*) AS total FROM DAT');
-if ($result) {
-    $counts['bookings'] = mysqli_fetch_assoc($result)['total'];
-}
-$result = mysqli_query($conn, 'SELECT COUNT(*) AS total FROM KHACH_HANG');
-if ($result) {
-    $counts['customers'] = mysqli_fetch_assoc($result)['total'];
-}
-$result = mysqli_query($conn, 'SELECT COUNT(*) AS total FROM nhan_vien');
-if ($result) {
-    $counts['employees'] = mysqli_fetch_assoc($result)['total'];
-}
-?>
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>Admin Dashboard - N2H HOTEL</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-<?php include 'navbar.php'; ?>
-<div class="container py-5">
-    <div class="row mb-4">
-        <div class="col-12">
-            <h2>Admin Dashboard</h2>
-            <p class="text-muted">Chào mừng, <?php echo htmlspecialchars($_SESSION['user_name']); ?>. Đây là trang quản trị dành cho Admin.</p>
-        </div>
-    </div>
-    <div class="row g-4">
-        <div class="col-md-3">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Tổng phòng</h5>
-                    <p class="display-6 mb-0"><?php echo $counts['rooms']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Đặt phòng</h5>
-                    <p class="display-6 mb-0"><?php echo $counts['bookings']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Khách hàng</h5>
-                    <p class="display-6 mb-0"><?php echo $counts['customers']; ?></p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h5 class="card-title">Nhân viên</h5>
-                    <p class="display-6 mb-0"><?php echo $counts['employees']; ?></p>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="row mt-4">
-        <div class="col-md-3">
-            <a class="btn btn-primary w-100" href="ql_phong.php">Quản lý phòng</a>
-        </div>
-        <div class="col-md-3">
-            <a class="btn btn-success w-100" href="ql_nhanvien.php">Quản lý nhân viên</a>
-        </div>
-        <div class="col-md-3">
-            <a class="btn btn-secondary w-100" href="ql_hoadon.php">Hóa đơn</a>
-        </div>
-        <div class="col-md-3">
-            <a class="btn btn-outline-primary w-100" href="index.php">Về trang chủ</a>
-        </div>
-    </div>
-    <div class="row mt-3">
-        <div class="col-md-3">
-            <a class="btn btn-info w-100 text-white" href="ql_khachhang.php">Quản lý khách hàng</a>
-        </div>
-    </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+page('Tổng quan vận hành'); ?><div class="grid"><?php foreach(['Phòng hoạt động'=>$stats['total'],'Đang có khách'=>$stats['occupied']??0,'Chờ dọn'=>$stats['dirty']??0,'Nhận hôm nay'=>$in,'Đến hạn / quá hạn trả'=>$out] as $label=>$value): ?><div class="panel"><div class="muted"><?=h($label)?></div><div class="stat"><?=h($value)?></div></div><?php endforeach; ?></div>
+<div class="panel"><h2>Thống kê doanh thu & dòng tiền</h2><form class="row" method="get"><?php input('from','Từ ngày',$from,'date','required'); input('to','Đến ngày',$to,'date','required'); ?><label>&nbsp;<button>Xem thống kê</button></label><label>&nbsp;<button name="export" value="1" class="secondary">Xuất CSV</button></label></form><div class="grid"><div><p class="muted">Tiền thu</p><strong class="price"><?=money($cash['received'])?></strong></div><div><p class="muted">Đã hoàn</p><strong class="price"><?=money($cash['refunded'])?></strong></div><div><p class="muted">Thu ròng</p><strong class="price"><?=money($cash['net'])?></strong></div><div><p class="muted">Doanh thu hóa đơn đã chốt</p><strong class="price"><?=money($revenue['total'])?></strong><p><?=$revenue['n']?> hóa đơn</p></div></div><p class="muted">Thu ròng tính theo ngày giao dịch, bao gồm đặt cọc. Doanh thu hóa đơn tính theo ngày trả phòng và lập hóa đơn. Hai chỉ tiêu có thể khác nhau. Không tự cộng số liệu từ sổ cũ chưa đối soát.</p></div>
+<div class="split"><section class="panel"><h2>Thu ròng theo ngày</h2><table><thead><tr><th>Ngày</th><th>Thu ròng</th></tr></thead><tbody><?php foreach($daily as $d): ?><tr><td><?=h($d['day'])?></td><td><?=money($d['net'])?></td></tr><?php endforeach; if(!$daily): ?><tr><td colspan="2">Chưa có giao dịch trong khoảng này.</td></tr><?php endif; ?></tbody></table></section><section class="panel"><h2>Cần xử lý</h2><?php foreach($warnings as $b): ?><p><a href="chitiet_datphong.php?id=<?=$b['MADAT']?>">Đơn #<?=$b['MADAT']?> · <?=h($b['HOTENKH'])?></a><br><small><?=h($b['TRANGTHAI'])?> · Nhận <?=h(substr($b['NGAYNHAN'],0,10))?> · Trả <?=h(substr($b['NGAYTRA'],0,10))?><?=$b['LEGACY_REVIEW']?' · Cần đối soát':''?></small></p><?php endforeach; if(!$warnings): ?><p>Không có đơn cần cảnh báo.</p><?php endif; ?><p><a href="lich_phong.php">Mở lịch phòng →</a></p></section></div><?php endpage(); ?>
