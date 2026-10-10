@@ -1,6 +1,4 @@
 <?php
-session_start();
-$_SESSION = array();
-session_destroy();
-header('Location: login.php');
-exit();
+require 'app/bootstrap.php';
+if($_SERVER['REQUEST_METHOD']!=='POST') { http_response_code(405); exit('Dùng nút Đăng xuất.'); }
+check_csrf(); $_SESSION=[]; session_destroy(); go('login.php');
