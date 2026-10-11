@@ -1,134 +1,15 @@
 <?php
-session_start();
-include 'config.php';
-
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit();
-}
-
-$message = '';
-$maPhong = isset($_GET['id_phong']) ? intval($_GET['id_phong']) : 0;
-$room = null;
-$customer = null;
-$needsInfo = false;
-if ($maPhong > 0) {
-    $roomSql = "SELECT PHONG.MAPHONG, LOAI_PHONG.TENLOAIPHONG, PHONG.GIAPHONG, PHONG.TINHTRANG FROM PHONG JOIN LOAI_PHONG ON PHONG.MALOAIPHONG = LOAI_PHONG.MALOAIPHONG WHERE PHONG.MAPHONG = $maPhong LIMIT 1";
-    $roomResult = mysqli_query($conn, $roomSql);
-    if ($roomResult) {
-        $room = mysqli_fetch_assoc($roomResult);
-    }
-}
-
-$maKH = $_SESSION['user_id'];
-$userSql = "SELECT MAKH, HOTENKH, SDT, CCCD, EMAIL FROM KHACH_HANG WHERE MAKH = $maKH LIMIT 1";
-$userResult = mysqli_query($conn, $userSql);
-if ($userResult) {
-    $customer = mysqli_fetch_assoc($userResult);
-    $needsInfo = empty($customer['SDT']) || empty($customer['CCCD']);
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $room) {
-    $ngayDat = date('Y-m-d H:i:s');
-    $ngayNhan = $_POST['ngayNhan'] ?? '';
-    $ngayTra = $_POST['ngayTra'] ?? '';
-    $sdt = trim($_POST['sdt'] ?? $customer['SDT']);
-    $cccd = trim($_POST['cccd'] ?? $customer['CCCD']);
-
-    if ($ngayNhan === '' || $ngayTra === '') {
-        $message = 'Vui lòng chọn ngày nhận và ngày trả.';
-    } elseif ($ngayNhan > $ngayTra) {
-        $message = 'Ngày trả phải sau hoặc bằng ngày nhận.';
-    } elseif ($room['TINHTRANG'] === 'Có khách') {
-        $message = 'Phòng hiện đang có khách, vui lòng chọn phòng khác.';
-    } elseif ($needsInfo && ($sdt === '' || $cccd === '')) {
-        $message = 'Vui lòng cung cấp số điện thoại và CCCD để hoàn tất đặt phòng.';
-    } else {
-        if ($needsInfo) {
-            $updateStmt = mysqli_prepare($conn, 'UPDATE KHACH_HANG SET SDT = ?, CCCD = ? WHERE MAKH = ?');
-            if ($updateStmt) {
-                mysqli_stmt_bind_param($updateStmt, 'ssi', $sdt, $cccd, $maKH);
-                mysqli_stmt_execute($updateStmt);
-                mysqli_stmt_close($updateStmt);
-                $customer['SDT'] = $sdt;
-                $customer['CCCD'] = $cccd;
-                $needsInfo = false;
-            }
-        }
-
-        $stmt = mysqli_prepare($conn, 'INSERT INTO DAT (MAKH, MAPHONG, NGAYDAT, NGAYNHAN, NGAYTRA) VALUES (?, ?, ?, ?, ?)');
-        if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'iisss', $maKH, $maPhong, $ngayDat, $ngayNhan, $ngayTra);
-            if (mysqli_stmt_execute($stmt)) {
-                mysqli_query($conn, "UPDATE PHONG SET TINHTRANG = 'Có khách' WHERE MAPHONG = $maPhong");
-                $message = 'Đặt phòng thành công!';
-            } else {
-                $message = 'Đặt phòng thất bại, vui lòng thử lại.';
-            }
-            mysqli_stmt_close($stmt);
-        } else {
-            $message = 'Lỗi hệ thống, không thể đặt phòng.';
-        }
-    }
-}
-?>
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <title>Đặt phòng - N2H HOTEL</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-<?php include 'navbar.php'; ?>
-<div class="container py-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <div class="card shadow-sm">
-                <div class="card-body">
-                    <h3 class="card-title mb-4">Đặt phòng</h3>
-                    <?php if ($message): ?>
-                        <div class="alert alert-info"><?php echo htmlspecialchars($message); ?></div>
-                    <?php endif; ?>
-
-                    <?php if ($room): ?>
-                        <div class="mb-4">
-                            <h5><?php echo htmlspecialchars($room['TENLOAIPHONG']); ?> - Mã phòng <?php echo htmlspecialchars($room['MAPHONG']); ?></h5>
-                            <p class="mb-1">Giá: <?php echo number_format($room['GIAPHONG'], 0, ',', '.'); ?>đ</p>
-                            <p class="mb-0">Trạng thái: <?php echo htmlspecialchars($room['TINHTRANG']); ?></p>
-                        </div>
-                        <form method="post" action="datphong.php?id_phong=<?php echo $maPhong; ?>">
-                            <div class="mb-3">
-                                <label for="ngayNhan" class="form-label">Ngày nhận</label>
-                                <input type="date" class="form-control" id="ngayNhan" name="ngayNhan" required>
-                            </div>
-                            <div class="mb-3">
-                                <label for="ngayTra" class="form-label">Ngày trả</label>
-                                <input type="date" class="form-control" id="ngayTra" name="ngayTra" required>
-                            </div>
-                            <?php if ($needsInfo): ?>
-                                <div class="alert alert-warning">Chúng tôi cần thêm thông tin để hoàn tất đặt phòng.</div>
-                                <div class="mb-3">
-                                    <label for="sdt" class="form-label">Số điện thoại</label>
-                                    <input type="text" class="form-control" id="sdt" name="sdt" value="<?php echo htmlspecialchars($customer['SDT'] ?? ''); ?>" required>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="cccd" class="form-label">Số CCCD/CMND</label>
-                                    <input type="text" class="form-control" id="cccd" name="cccd" value="<?php echo htmlspecialchars($customer['CCCD'] ?? ''); ?>" required>
-                                </div>
-                            <?php endif; ?>
-                            <button type="submit" class="btn btn-primary">Xác nhận đặt phòng</button>
-                            <a href="index.php" class="btn btn-secondary ms-2">Quay lại</a>
-                        </form>
-                    <?php else: ?>
-                        <div class="alert alert-warning">Không tìm thấy phòng. Vui lòng chọn lại phòng từ trang chủ.</div>
-                        <a href="index.php" class="btn btn-secondary">Trang chủ</a>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+require 'app/booking.php'; require_login(); if(!staff()&&!is_role('KhachHang')) { http_response_code(403); exit('Nhân viên buồng phòng không có quyền đặt phòng.'); }
+$id=(int)($_GET['id_phong']??$_POST['room']??0);
+$r=row('SELECT p.*,l.TENLOAIPHONG,l.SUCCHUA,l.TIENNGHI,l.MOTA FROM phong p JOIN loai_phong l ON l.MALOAIPHONG=p.MALOAIPHONG WHERE p.MAPHONG=?',[$id]);
+if(!$r) { http_response_code(404); exit('Phòng không tồn tại.'); }
+$error='';
+if($_SERVER['REQUEST_METHOD']==='POST') { check_csrf(); $error=attempt(function() use($id) {
+    $customer=staff()?number_input('customer',1,2147483647):(int)user()['id'];
+    $bid=create_booking($id,$customer,text_input('start',10),text_input('end',10),number_input('guests',1,20),text_input('note',500,false));
+    flash('Đặt phòng thành công. Mã đơn #'.$bid); go('chitiet_datphong.php?id='.$bid);
+}); }
+$start=$_POST['start']??$_GET['start']??date('Y-m-d'); $end=$_POST['end']??$_GET['end']??date('Y-m-d',strtotime('+1 day'));
+page('Đặt phòng '.$id); error_box($error); ?><div class="split"><div class="card"><img style="height:300px" src="<?=h(image_path($r['HINH_ANH']))?>" alt="Ảnh phòng"><div class="body"><h2><?=h($r['TENLOAIPHONG'])?></h2><p><?=h($r['MOTA'])?></p><p><?=h($r['TIENNGHI'])?></p><p>Tầng <?=h($r['TANG'])?> · Tối đa <?=h($r['SUCCHUA'])?> khách</p><p class="price"><?=money($r['GIAPHONG'])?> / đêm</p></div></div><div class="panel"><form method="post"><?php token(); ?>
+<?php if(staff()): $customers=rows('SELECT MAKH,HOTENKH,SDT FROM khach_hang WHERE ACTIVE=1 ORDER BY HOTENKH'); $opts=[]; foreach($customers as $c) $opts[$c['MAKH']]=$c['HOTENKH'].' · '.$c['SDT']; select_field('customer','Khách hàng',$opts,$_POST['customer']??''); ?><p><a href="ql_khachhang.php">Thêm hồ sơ khách mới</a> trước khi đặt.</p><?php else: ?><p>Người đặt: <strong><?=h(user()['name'])?></strong> · <a href="taikhoan.php">Cập nhật hồ sơ</a></p><?php endif; ?>
+<div class="row"><?php input('start','Ngày nhận',$start,'date','required min="'.date('Y-m-d').'"'); input('end','Ngày trả',$end,'date','required'); ?></div><?php input('guests','Số khách',$_POST['guests']??$_GET['guests']??1,'number','required min="1" max="'.(int)$r['SUCCHUA'].'"'); ?><label>Yêu cầu đặc biệt<textarea name="note" maxlength="500"><?=h($_POST['note']??'')?></textarea></label><p class="muted">Tối đa 90 đêm. Tiền phòng = số đêm đã đặt × giá/đêm. Trả sớm vẫn tính theo lịch đã đặt. Dịch vụ phát sinh được tính riêng. Thu tiền do lễ tân ghi nhận; chưa có thanh toán trực tuyến.</p><button>Xác nhận đặt phòng</button></form></div></div><?php endpage(); ?>
